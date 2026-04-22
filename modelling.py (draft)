@@ -1,86 +1,120 @@
 import pandas as pd
+import json
+from datetime import datetime
 from crewai import Agent, Task, Crew, Process
 
 # ==========================================
-# 1. DATA INGESTION & CONTEXT PREPARATION
+# PHASE 1: INCOMING FRONTEND VARIABLES
 # ==========================================
-# We load the data and extract the schemas/samples to feed into the AI's context.
-sales_data = pd.read_csv('sales_data.csv')
-grocery_inventory = pd.read_csv('Grocery_Inventory_and_Sales_Dataset.csv')
+current_date = datetime.now().strftime("%Y-%m-%d")
+user_query = "What should I restock for next week?"
+inventory_file = "Grocery_Inventory_and_Sales_Dataset.csv"
 
-def get_data_context(df, name):
-    schema = df.dtypes.to_dict()
-    sample = df.head(2).to_dict(orient='records')
-    return f"--- {name} ---\nColumns: {schema}\nSample: {sample}\n"
-
-data_context = get_data_context(sales_data, "SALES DATA") + \
-               get_data_context(grocery_inventory, "GROCERY INVENTORY")
-
+print("--- PHASE 1: RECEIVING DATA ---")
+print(f"Date: {current_date} | Query: '{user_query}'\n")
 
 # ==========================================
-# 2. THE "MODELLING" (PROMPT ENGINEERING AGENTS)
+# PHASE 2: CONTEXT INJECTION (YOUR JOB)
 # ==========================================
-# Instead of compiling a machine learning model, we engineer an Agent.
-# The 'backstory' and 'role' act as the Master System Prompt.
+# 1. Read the spreadsheet the user uploaded
+try:
+    df = pd.read_csv(inventory_file)
+except FileNotFoundError:
+    print(f"Error: Could not find {inventory_file}. Make sure it is in the same folder.")
+    exit()
 
-inventory_strategist = Agent(
-    role='Elite Retail Supply Chain & Inventory Analyst',
-    goal='Identify stockout risks, analyze demand drivers, and provide actionable supply chain pivots.',
-    backstory=(
-        "You are 'Inven-Ops-GPT', a seasoned Supply Chain Director. "
-        "You use logical deduction and statistical reasoning to solve complex retail problems. "
-        "You are proactive about highlighting risks (e.g., stockouts, dead stock) before they happen. "
-        "You always check 'Reorder_Level' against 'Stock_Quantity' and pay extreme attention to "
-        "items marked as 'Discontinued' or 'Backordered'."
-    ),
-    verbose=True,
-    allow_delegation=False,
-    # llm=ChatOpenAI(model_name="gpt-4", temperature=0.2) # Typically you'd pass your LLM here
+# Let's take just the first item from the dataset as an example to process
+row = df.iloc[0]
+
+# 2. Map the spreadsheet columns to your STANDARDIZED VARIABLES
+item_name = row['Product_Name']
+current_stock = int(row['Stock_Quantity'])
+reorder_threshold = int(row['Reorder_Level'])
+supplier_contact = row['Supplier_Name'] + "@supplier.com" # Mocking an email
+
+print(f"--- PHASE 2: PREPARING CONTEXT FOR AI ---")
+print(f"Item: {item_name} | Stock: {current_stock} | Threshold: {reorder_threshold}\n")
+
+
+# ==========================================
+# PHASE 3: CREW AI MODELLING (YOUR PROMPT ENGINEERING)
+# ==========================================
+
+# 1. The Master Prompt (Agent Backstory)
+system_prompt = f"""You are an elite inventory manager for a Malaysian SME retail store.
+Today's date is {current_date}.
+Your core logic:
+1. Compare 'current_stock' against 'reorder_threshold'.
+2. If current_stock is STRICTLY LESS THAN reorder_threshold, action MUST be "reorder".
+3. If "reorder", draft a polite email to 'supplier_contact' requesting enough units to double the threshold limit.
+4. If stock is fine, action is "none" and draft_message is empty.
+"""
+
+# 2. Define the Zhipu/CrewAI Agent
+inventory_agent = Agent(
+    role='Inventory Decision Engine',
+    goal='Make strict, mathematical restocking decisions and output ONLY valid JSON.',
+    backstory=system_prompt,
+    verbose=False,
+    allow_delegation=False
+    # llm=zhipu_llm  <-- THIS IS WHERE THE API PERSON CONNECTS ZHIPU AI
 )
 
-
-# ==========================================
-# 3. DEFINING THE WORK (TASKS)
-# ==========================================
-# Tasks are the specific prompts and instructions we want the Agent to execute 
-# using the context we've provided.
-
-analyze_inventory_task = Task(
+# 3. Define the Task (Injecting the specific item variables)
+decision_task = Task(
     description=(
-        f"Review the following retail data context:\n{data_context}\n\n"
-        "Analyze the grocery inventory data specifically looking for items that are 'Discontinued' "
-        "or 'Backordered'. Consider the recent sales demand and provide a strategy on how to handle "
-        "these specific items."
+        f"USER QUERY: {user_query}\n\n"
+        f"DATA POINT:\n"
+        f"- item_name: {item_name}\n"
+        f"- current_stock: {current_stock}\n"
+        f"- reorder_threshold: {reorder_threshold}\n"
+        f"- supplier_contact: {supplier_contact}\n\n"
+        "Based on your instructions, make a decision for this specific item."
     ),
     expected_output=(
-        "A structured report containing:\n"
-        "1. 📊 Data Observation (What the data says)\n"
-        "2. ⚠️ Risk Identification (Potential supply chain impacts)\n"
-        "3. 🎯 Strategic Recommendation (Actionable next steps)"
+        "You must return ONLY a raw JSON object with absolutely no markdown wrapping, no ```json tags, and no conversational text. "
+        "It must use exactly these variables:\n"
+        "{\n"
+        '  "recommended_action": "reorder" | "discount" | "none",\n'
+        '  "draft_message": "your drafted text here"\n'
+        "}"
     ),
-    agent=inventory_strategist
+    agent=inventory_agent
 )
 
-
-# ==========================================
-# 4. THE EXECUTION PIPELINE (CREW)
-# ==========================================
-# We assemble the Crew (our AI models) and set them to work.
-
+# 4. Assemble the Crew
 inventory_crew = Crew(
-    agents=[inventory_strategist],
-    tasks=[analyze_inventory_task],
-    process=Process.sequential, # Tasks are executed one after another
-    verbose=True
+    agents=[inventory_agent],
+    tasks=[decision_task],
+    process=Process.sequential
 )
 
-if __name__ == "__main__":
-    print(">>> Starting the CrewAI modelling execution...\n")
+# ==========================================
+# PHASE 4: EXECUTION & AGENTIC HANDOFF
+# ==========================================
+print("--- PHASE 3: AI PROCESSING (CREW AI) ---")
+print("Sending exact variables to the Agent...\n")
+
+# Fire the Crew (This generates the ai_raw_response)
+# Note: Since we don't have the API key plugged in right now, I will mock the 
+# ai_raw_response exactly how CrewAI would output it based on the data.
+# In production, this line is: ai_raw_response = inventory_crew.kickoff()
+
+# MOCKING THE AI RESPONSE (Because Sushi Rice stock is 22, and threshold is 72)
+ai_raw_response = '{"recommended_action": "reorder", "draft_message": "Dear Jaxnation, we are currently low on Sushi Rice. Please send 144 units to our warehouse as soon as possible."}'
+
+print(f"Raw AI Output Received:\n{ai_raw_response}\n")
+
+# THE HANDOFF: We parse your JSON so the Agentic Logic team can use it!
+try:
+    ai_decision = json.loads(ai_raw_response)
     
-    # Kickoff the process
-    # result = inventory_crew.kickoff()
+    recommended_action = ai_decision.get("recommended_action")
+    draft_message = ai_decision.get("draft_message")
     
-    # print("--- FINAL STRATEGY REPORT ---")
-    # print(result)
+    print("--- PHASE 4: AGENTIC LOGIC HANDOFF (SUCCESS) ---")
+    print(f"Trigger Tool: {recommended_action.upper()} API")
+    print(f"Payload to send to {supplier_contact}:\n '{draft_message}'")
     
-    print("Crew compiled successfully. The Agent is ready with its Master Prompts and Identity.")
+except json.JSONDecodeError:
+    print("ERROR: AI hallucinated and did not return valid JSON. Tweak the prompt!")
