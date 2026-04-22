@@ -1,0 +1,86 @@
+import pandas as pd
+from crewai import Agent, Task, Crew, Process
+
+# ==========================================
+# 1. DATA INGESTION & CONTEXT PREPARATION
+# ==========================================
+# We load the data and extract the schemas/samples to feed into the AI's context.
+sales_data = pd.read_csv('sales_data.csv')
+grocery_inventory = pd.read_csv('Grocery_Inventory_and_Sales_Dataset.csv')
+
+def get_data_context(df, name):
+    schema = df.dtypes.to_dict()
+    sample = df.head(2).to_dict(orient='records')
+    return f"--- {name} ---\nColumns: {schema}\nSample: {sample}\n"
+
+data_context = get_data_context(sales_data, "SALES DATA") + \
+               get_data_context(grocery_inventory, "GROCERY INVENTORY")
+
+
+# ==========================================
+# 2. THE "MODELLING" (PROMPT ENGINEERING AGENTS)
+# ==========================================
+# Instead of compiling a machine learning model, we engineer an Agent.
+# The 'backstory' and 'role' act as the Master System Prompt.
+
+inventory_strategist = Agent(
+    role='Elite Retail Supply Chain & Inventory Analyst',
+    goal='Identify stockout risks, analyze demand drivers, and provide actionable supply chain pivots.',
+    backstory=(
+        "You are 'Inven-Ops-GPT', a seasoned Supply Chain Director. "
+        "You use logical deduction and statistical reasoning to solve complex retail problems. "
+        "You are proactive about highlighting risks (e.g., stockouts, dead stock) before they happen. "
+        "You always check 'Reorder_Level' against 'Stock_Quantity' and pay extreme attention to "
+        "items marked as 'Discontinued' or 'Backordered'."
+    ),
+    verbose=True,
+    allow_delegation=False,
+    # llm=ChatOpenAI(model_name="gpt-4", temperature=0.2) # Typically you'd pass your LLM here
+)
+
+
+# ==========================================
+# 3. DEFINING THE WORK (TASKS)
+# ==========================================
+# Tasks are the specific prompts and instructions we want the Agent to execute 
+# using the context we've provided.
+
+analyze_inventory_task = Task(
+    description=(
+        f"Review the following retail data context:\n{data_context}\n\n"
+        "Analyze the grocery inventory data specifically looking for items that are 'Discontinued' "
+        "or 'Backordered'. Consider the recent sales demand and provide a strategy on how to handle "
+        "these specific items."
+    ),
+    expected_output=(
+        "A structured report containing:\n"
+        "1. 📊 Data Observation (What the data says)\n"
+        "2. ⚠️ Risk Identification (Potential supply chain impacts)\n"
+        "3. 🎯 Strategic Recommendation (Actionable next steps)"
+    ),
+    agent=inventory_strategist
+)
+
+
+# ==========================================
+# 4. THE EXECUTION PIPELINE (CREW)
+# ==========================================
+# We assemble the Crew (our AI models) and set them to work.
+
+inventory_crew = Crew(
+    agents=[inventory_strategist],
+    tasks=[analyze_inventory_task],
+    process=Process.sequential, # Tasks are executed one after another
+    verbose=True
+)
+
+if __name__ == "__main__":
+    print(">>> Starting the CrewAI modelling execution...\n")
+    
+    # Kickoff the process
+    # result = inventory_crew.kickoff()
+    
+    # print("--- FINAL STRATEGY REPORT ---")
+    # print(result)
+    
+    print("Crew compiled successfully. The Agent is ready with its Master Prompts and Identity.")
