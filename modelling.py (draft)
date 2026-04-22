@@ -1,7 +1,8 @@
 import pandas as pd
 import json
 from datetime import datetime
-# from crewai import Agent, Task, Crew, Process  # Uncomment when API is connected
+from zai import ZaiClient   # pip install zai-sdk
+import zai
 
 # ============================================================
 #  STANDARDISED VARIABLE CONTRACT
@@ -36,11 +37,11 @@ from datetime import datetime
 #
 #  PHASE 3 — AI LAYER VARIABLES
 #  ┌─────────────────┬────────────────────────────────────────────────────┐
-#  │ system_prompt   │ Hidden master instructions sent to Zhipu AI.       │
+#  │ system_prompt   │ Hidden master instructions sent to Z.ai.           │
 #  │                 │ e.g. "You are an inventory manager for a           │
 #  │                 │        Malaysian retail store..."                  │
 #  ├─────────────────┼────────────────────────────────────────────────────┤
-#  │ ai_raw_response │ The exact, unedited text returned by Zhipu AI.     │
+#  │ ai_raw_response │ The exact, unedited text returned by Z.ai.         │
 #  │                 │ e.g. '{"recommended_action":"reorder",...}'        │
 #  └─────────────────┴────────────────────────────────────────────────────┘
 #
@@ -59,9 +60,15 @@ from datetime import datetime
 # ============================================================
 # PHASE 1 — FRONTEND INPUTS
 # ============================================================
-current_date    = datetime.now().strftime("%Y-%m-%d")        # STD VAR: current_date
-user_query      = "What should I restock for next week?"     # STD VAR: user_query
-inventory_file  = "Grocery_Inventory_and_Sales_Dataset.csv"  # STD VAR: inventory_file
+current_date   = datetime.now().strftime("%Y-%m-%d")         # STD VAR: current_date
+user_query     = "What should I restock for next week?"      # STD VAR: user_query
+inventory_file = "Grocery_Inventory_and_Sales_Dataset.csv"   # STD VAR: inventory_file
+
+# ── Z.ai API key ───────────────────────────────────────────
+# Set your key here OR export ZAI_API_KEY="your-key" in your shell.
+# For overseas accounts use ZaiClient; for Chinese accounts use ZhipuAiClient.
+ZAI_API_KEY = "YOUR_API_KEY_HERE"   # <── replace or set env var
+ZAI_MODEL   = "glm-4.7"             # recommended: glm-4.7 or glm-5.1
 
 print("=" * 62)
 print("PHASE 1 — FRONTEND INPUTS")
@@ -69,6 +76,7 @@ print("=" * 62)
 print(f"  current_date    = {current_date}")
 print(f"  user_query      = '{user_query}'")
 print(f"  inventory_file  = {inventory_file}")
+print(f"  model           = {ZAI_MODEL}")
 
 
 # ============================================================
@@ -266,10 +274,12 @@ print(f"  supplier_contact   = {supplier_contact}")
 
 
 # ============================================================
-# PHASE 3 — AI LAYER  (Zhipu AI via CrewAI)
+# PHASE 3 — AI LAYER  (Z.ai — official SDK: pip install zai-sdk)
+# Docs : https://docs.z.ai/guides/overview/quick-start
+# Model: glm-4.7 (default) or glm-5.1
 # ============================================================
 print("\n" + "=" * 62)
-print("PHASE 3 — AI LAYER")
+print("PHASE 3 — AI LAYER  (Z.ai)")
 print("=" * 62)
 
 # STD VAR: system_prompt
@@ -286,10 +296,13 @@ Decision rules:
 4. If stock is healthy  →  recommended_action = "none"
    draft_message must be an empty string.
 
+IMPORTANT: Return ONLY a raw JSON object — no markdown, no ```json fences, no extra text.
+Schema: {{ "item_name": str, "recommended_action": "reorder"|"discount"|"none", "reason": str, "draft_message": str }}
+
 Dataset schema in use: {schema_name}
 """
 
-task_description = (
+user_message = (
     f"USER QUERY: {user_query}\n\n"
     f"ITEM DATA:\n"
     f"  item_name          : {item_name}\n"
@@ -298,76 +311,41 @@ task_description = (
     f"  supplier_contact   : {supplier_contact}\n"
     f"  category           : {ctx.get('category')}\n"
     f"  units_sold         : {ctx.get('units_sold')}\n"
-    f"  status             : {ctx.get('status')}\n"
-    "\nMake a restocking decision for this item."
+    f"  status             : {ctx.get('status')}\n\n"
+    f"Make a restocking decision for this item."
 )
 
-expected_output = (
-    "Return ONLY a raw JSON object. No markdown, no ```json fences, no extra text.\n"
-    "{\n"
-    '  "item_name"          : "<string>",\n'
-    '  "recommended_action" : "reorder" | "discount" | "none",\n'
-    '  "reason"             : "<one sentence>",\n'
-    '  "draft_message"      : "<ready-to-send text, or empty string>"\n'
-    "}"
-)
+print(f"  Calling Z.ai ({ZAI_MODEL})...")
 
-# ── CrewAI wiring — uncomment once Zhipu API key is connected ────────────
-# inventory_agent = Agent(
-#     role      = 'Inventory Decision Engine',
-#     goal      = 'Make strict restocking decisions and return ONLY valid JSON.',
-#     backstory = system_prompt,
-#     verbose   = False,
-#     allow_delegation = False,
-#     # llm = zhipu_llm   <── plug Zhipu LLM instance here
-# )
-# decision_task = Task(
-#     description     = task_description,
-#     expected_output = expected_output,
-#     agent           = inventory_agent,
-# )
-# inventory_crew = Crew(
-#     agents  = [inventory_agent],
-#     tasks   = [decision_task],
-#     process = Process.sequential,
-# )
-# ai_raw_response = str(inventory_crew.kickoff())   # STD VAR: ai_raw_response
-# ─────────────────────────────────────────────────────────────────────────
+# ── Z.ai API call ──────────────────────────────────────────────────────────
+try:
+    zai_client = ZaiClient(api_key=ZAI_API_KEY)
 
-print(f"  system_prompt      → defined above")
-print(f"  Sending to Zhipu AI...\n")
+    response = zai_client.chat.completions.create(
+        model=ZAI_MODEL,
+        messages=[
+            {"role": "system", "content": system_prompt},   # STD VAR: system_prompt
+            {"role": "user",   "content": user_message},
+        ],
+        temperature=0.1,    # low temp = consistent, deterministic JSON output
+        max_tokens=1000,
+    )
 
-# ── MOCK ai_raw_response — remove this entire block when CrewAI is live ──
-_stock     = current_stock or 0
-_threshold = reorder_threshold or 0
+    # STD VAR: ai_raw_response — exact unedited text from Z.ai
+    ai_raw_response = response.choices[0].message.content
 
-if _stock < _threshold:
-    _target = int(_threshold * 2)
-    _mock = {
-        "item_name"          : item_name,
-        "recommended_action" : "reorder",
-        "reason"             : f"current_stock ({_stock}) < reorder_threshold ({_threshold}).",
-        "draft_message"      : (
-            f"Hi {ctx.get('supplier_name', 'Supplier')},\n\n"
-            f"We are running low on {item_name}. "
-            f"Current stock is {_stock} units against a reorder level of {_threshold}. "
-            f"Please arrange delivery of {_target} units at your earliest convenience.\n\n"
-            f"Thank you."
-        )
-    }
-else:
-    _mock = {
-        "item_name"          : item_name,
-        "recommended_action" : "none",
-        "reason"             : f"current_stock ({_stock}) >= reorder_threshold ({_threshold}).",
-        "draft_message"      : ""
-    }
+except zai.core.APIStatusError as e:
+    print(f"  Z.ai API error    : {e}")
+    ai_raw_response = '{"recommended_action":"none","draft_message":"","reason":"API error."}'
+except zai.core.APITimeoutError:
+    print("  Z.ai request timed out.")
+    ai_raw_response = '{"recommended_action":"none","draft_message":"","reason":"Timeout."}'
+except Exception as e:
+    print(f"  Unexpected error  : {e}")
+    ai_raw_response = '{"recommended_action":"none","draft_message":"","reason":"Unexpected error."}'
+# ──────────────────────────────────────────────────────────────────────────
 
-# STD VAR: ai_raw_response
-ai_raw_response = json.dumps(_mock)
-# ─────────────────────────────────────────────────────────────────────────
-
-print(f"  ai_raw_response    =\n  {ai_raw_response}\n")
+print(f"\n  ai_raw_response =\n  {ai_raw_response}\n")
 
 
 # ============================================================
@@ -379,7 +357,9 @@ print("PHASE 4 — AGENTIC HANDOFF")
 print("=" * 62)
 
 try:
-    _parsed = json.loads(ai_raw_response)
+    # Strip accidental ```json fences if the model adds them despite instructions
+    _clean = ai_raw_response.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    _parsed = json.loads(_clean)
 
     recommended_action = _parsed.get("recommended_action", "none")  # STD VAR: recommended_action
     draft_message      = _parsed.get("draft_message", "")           # STD VAR: draft_message
@@ -397,7 +377,8 @@ try:
 
 except json.JSONDecodeError:
     print("  ERROR: ai_raw_response is not valid JSON.")
-    print("  Fix : Review system_prompt or check Zhipu AI output.")
+    print("  Raw output was:", ai_raw_response)
+    print("  Fix: Tighten system_prompt or lower temperature.")
 
 print("\n" + "=" * 62)
 print("PIPELINE COMPLETE")
