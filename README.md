@@ -7,4 +7,4 @@ Link to UM Hackathon 2026 Final Documentation:
 [View Refined QATD](https://github.com/andrewteeky-code/UM-Hackathon-2026/blob/1ba189d18a812387930bce718a9e82c12282a6e6/UM%20Hackathon%202026%20Refined%20QATD%20Team%20182%20OREO.pdf)
 [View Business Proposal](https://github.com/andrewteeky-code/UM-Hackathon-2026/blob/3db27128554776cb56f75768522412022bdf7e6b/UM%20Hackathon%202026%20Business%20Proposal%20Team%20182%20OREO.pdf)
 [View Deployment Plan](https://github.com/andrewteeky-code/UM-Hackathon-2026/blob/3db27128554776cb56f75768522412022bdf7e6b/UM%20Hackathon%202026%20Deployment%20Plan%20Team%20182%20OREO.pdf)
-[View Final Pitch Deck](path/to/your/file.ext)
+[View Final Pitch Deck](https://github.com/andrewteeky-code/UM-Hackathon-2026/blob/617e0c5c2656067a73937c44b57a6852daa10ed5/InvenIQ%20Final%20PitchDeck%20Team%20182%20OREO.pdf)
